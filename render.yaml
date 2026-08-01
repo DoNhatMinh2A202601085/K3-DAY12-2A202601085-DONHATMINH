@@ -1,0 +1,31 @@
+# CP5 — Cấu hình deploy Render (dùng nếu bạn chọn Render).
+#
+# Render đọc file này khi bạn tạo Blueprint từ repo GitHub.
+# `sync: false` = Render hỏi giá trị lúc deploy, KHÔNG lưu secret vào repo.
+
+services:
+  - type: web
+    name: day12-agent
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: AGENT_API_KEY
+        sync: false
+      - key: LOG_LEVEL
+        value: INFO
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "10"
+      - key: MONTHLY_BUDGET_USD
+        value: "10.0"
+      - key: REDIS_URL
+        fromService:
+          name: day12-redis
+          type: redis
+          property: connectionString
+
+  - type: redis
+    name: day12-redis
+    plan: free
+    ipAllowList: []
