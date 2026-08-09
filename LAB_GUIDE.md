@@ -3,7 +3,7 @@
 > **Bài làm cá nhân.** Xem quy định và cách đặt tên repo ở [README.md](README.md).
 >
 > Mỗi block kết thúc bằng một checkpoint. Đến giờ thì chạy lệnh checkpoint,
-> xanh hết mới sang block sau. Kẹt quá 10 phút → gọi trợ giảng và đi tiếp,
+> xanh hết mới sang block sau. Kẹt quá 10 phút → gọi Lab Coach và đi tiếp,
 > đừng đứng lại một chỗ.
 
 **Mục lục**
