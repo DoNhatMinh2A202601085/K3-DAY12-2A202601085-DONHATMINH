@@ -159,7 +159,43 @@ Chạy `docker compose up --scale agent=3` rồi gọi `/ask` nhiều lần vớ
 `X-User-Id`. Quan sát `history_length` trong response. Nếu lịch sử được lưu
 trong một dict Python thay vì Redis, bạn sẽ thấy con số đó thay đổi thế nào?
 
-> *Câu trả lời của bạn*
+> **Trả lời — theo đúng thứ tự sự kiện:**
+>
+> Code `/health` trong repo của bạn (main.py:76-92) **không gọi Redis** — chỉ kiểm tra `lifecycle.shutting_down`.
+> Code `/ready` trong repo của bạn (main.py:95-114) **CÓ gọi `store.ping()`** — kiểm tra Redis.
+>
+> Nếu gộp hai endpoint làm một (sai) và cho nó kiểm tra Redis:
+> 1. Redis mất kết nối 30 giây
+> 2. Container A gọi health check → Redis chết → trả **503**
+> 3. Container B gọi health check → Redis chết → trả **503**
+> 4. Container C gọi health check → Redis chết → trả **503**
+> 5. **Orchestrator nhận 503 → restart cả 3 container cùng lúc** (vì health check lúc này kiểm tra Redis — và container chết = process không sống)
+> 6. Khi Redis quay lại sau 30 giây → **không còn container nào đang chạy** để phục vụ request
+> 7. Hệ thống sập hoàn toàn
+>
+> **Tách ra đúng như repo của bạn:**
+> - `/health` chỉ trả lời "process còn sống không?" → Redis chết, container vẫn sống → **200** → không restart
+> - `/ready` kiểm tra Redis → Redis chết → **503** → load balancer ngừng gửi request vào, nhưng **không restart container** → khi Redis quay lại, container vẫn đó và tự phục vụ tiếp
+
+---
+
+### Câu 9 — Stateless (CP4)
+
+> **Trả lời:**
+>
+> Với **code đúng trong repo của bạn** (store.py dùng Redis):
+> - 3 container cùng nhìn vào **một Redis duy nhất**
+> - Gọi `/ask` lần 1 → history_length = 0
+> - Gọi `/ask` lần 2 → history_length = 2 (user + assistant)
+> - Gọi `/ask` lần 3 → history_length = 4
+> - **Luôn tăng dần**, bất kể request vào container nào
+>
+> Nếu dùng **dict Python trong RAM** (sai — ví dụ `conversation_history = {}` trong main.py hoặc store.py):
+> - Container A nhận câu 1: `history_length = 0`
+> - Container B nhận câu 2: `history_length = 0` (vì dict của B là rỗng!)
+> - Container A nhận câu 3: `history_length = 2` (B không ghi vào A)
+> - Container C nhận câu 4: `history_length = 0` (dict của C cũng rỗng)
+> - **history_length dao động ngẫu nhiên: 0, 0, 2, 0...** — agent "mất trí nhớ" tùy container
 
 ---
 
