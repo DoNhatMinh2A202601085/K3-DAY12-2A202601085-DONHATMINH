@@ -62,7 +62,24 @@ Sửa một ký tự trong `app/main.py` rồi build lại. Với Dockerfile c�
 layer nào được dùng lại từ cache, layer nào phải chạy lại? Nếu bạn đặt
 `COPY . .` lên trước `RUN pip install` thì kết quả khác thế nào?
 
-> *Câu trả lời của bạn*
+> **Câu trả lời:**
+> Dockerfile hiện tại có thứ tự đúng:
+> ```
+> COPY requirements.txt .        # layer 1
+> RUN pip install --prefix=/install -r requirements.txt  # layer 2
+> COPY app ./app                  # layer 3
+> COPY utils ./utils              # layer 4
+> ```
+> Khi sửa 1 ký tự trong `app/main.py`:
+> - **CACHED (giữ nguyên):** Layer 1 và Layer 2 — vì `requirements.txt` không thay đổi, Docker dùng lại cache
+> - **PHẢI REBUILD:** Layer 3 (`COPY app ./app`) — vì file trong `app/` đã thay đổi
+> - **CACHED hoặc REBUILD tùy:** Layer 4 (`COPY utils ./utils`) — chỉ rebuild nếu `utils/` cũng thay đổi
+>
+> Chỉ ~2 layer chạy lại → build nhanh (vài giây).
+>
+> Nếu đặt `COPY . .` **trước** `RUN pip install`:
+> - Mỗi lần sửa bất kỳ file nào trong `app/`, `utils/`, hay `requirements.txt` → layer `COPY . .` thay đổi → **Layer pip install BỊ HUỶ CACHE và chạy lại toàn bộ** → mất vài phút mỗi lần build
+> - Thêm vấn đề: các file không cần thiết (`.env`, `__pycache__`, `.git`) cũng được copy vào image
 
 ---
 
@@ -72,7 +89,20 @@ Container mặc định chạy bằng root. Mô tả chuỗi sự kiện dẫn t
 trong code Python của bạn" tới "kẻ tấn công có quyền cao trên máy host", và
 lệnh `USER` cắt đứt chuỗi đó ở chỗ nào.
 
-> *Câu trả lời của bạn*
+> **Chuỗi sự kiện nếu container chạy root:**
+> 1. Container chạy với **UID 0 (root)** bên trong
+> 2. Code Python có lỗ hổng (ví dụ: command injection, path traversal, deserialization)
+> 3. Attacker gửi payload khai thác lỗ hổng đó
+> 4. Attacker **đã là root bên trong container** — có thể: tạo user mới, sửa file hệ thống, cài thêm tool
+> 5. Attacker leo thang sang host qua **container escape** (vd: mount host filesystem, dirty pipe, privileged container)
+> 6. Kẻ tấn công **có quyền root trên máy host** → toàn bộ hệ thống bị kiểm soát
+>
+> **Lệnh `USER` cắt đứt ở bước 4:**
+> ```
+> RUN useradd --create-home --uid 10001 appuser
+> USER appuser
+> ```
+> Container chạy với UID 10001 (user thường), không phải root. Nếu attacker khai thác được lỗ hổng trong code Python, họ chỉ có quyền của user `appuser` — **không có quyền root** và **không thể thoát container** để leo lên host.
 
 ---
 
@@ -83,7 +113,17 @@ phút đồng hồ (reset lúc giây 00), một người dùng có thể gửi t
 request trong 2 giây liên tiếp khi hạn mức là 10/phút? Giải thích cách đạt được
 con số đó.
 
-> *Câu trả lời của bạn*
+> **Trả lời: Tối đa 20 request trong 2 giây.**
+>
+> **Cách đạt được:**
+> - Giả sử hạn mức 10/phút, reset lúc giây :00 mỗi phút
+> - Lúc **10:00:59** — gửi 10 request → đầy quota phút thứ 1
+> - Lúc **10:01:01** (sang phút mới, quota reset) — gửi 10 request → đầy quota phút thứ 2
+> - **Tổng: 20 request trong ~2 giây** (từ :59 của phút này đến :01 của phút sau)
+>
+> **Lý do:** Reset đồng hồ tạo "kẽ hở" — hai phút liền kề mỗi phút có 10 quota riêng, user khai thác được khoảng cách ~2 giây giữa hai lần reset.
+>
+> **Sliding window trong repo của bạn không có lỗ hở này:** Code dùng Redis ZSET với `zremrangebyscore(key, 0, now - 60)` — mọi request đều nằm trong cùng một cửa sổ 60 giây trượt, không có reset theo phút đồng hồ.
 
 ---
 
@@ -92,7 +132,15 @@ con số đó.
 Hai cơ chế này khác nhau ở điểm nào? Cho một tình huống mà rate limit cho qua
 nhưng cost guard phải chặn, và một tình huống ngược lại.
 
-> *Câu trả lời của bạn*
+> **Khác nhau:**
+> - **Rate limit** (rate_limiter.py): giới hạn **số lượng request** trong 60 giây
+> - **Cost guard** (cost_guard.py): giới hạn **số tiền** tổng chi tiêu tháng
+>
+> **Rate limit cho qua, cost guard chặn:**
+> Một user gửi 5 request/phút (dưới rate limit 10/phút), nhưng mỗi request có context lịch sử hội thoại rất dài → mỗi response trả về ~50,000 tokens. Sau 20 request, đã tiêu ~$5 USD — vượt ngân sách $10/tháng → cost guard chặn ở request thứ 21 dù rate limit vẫn còn quota.
+>
+> **Cost guard cho qua, rate limit chặn:**
+> Một user gửi 20 request rất ngắn (mỗi response chỉ 10 tokens, tốn ~$0.001). Tổng chi tiêu chỉ ~$0.02 — cách xa ngân sách $10. Nhưng nếu user gửi nhanh 15 request trong 5 giây → vượt rate limit 10/phút → rate limit chặn, dù cost guard hoàn toàn cho qua.
 
 ---
 
