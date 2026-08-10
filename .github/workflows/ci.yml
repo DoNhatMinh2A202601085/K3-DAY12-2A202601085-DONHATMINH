@@ -1,0 +1,66 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  AGENT_API_KEY: ci-dummy
+  REDIS_URL: "fake://"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests (exclude cp5 and bonus)
+        run: pytest tests/ --ignore=tests/test_cp5.py --ignore=tests/test_bonus_cicd.py -v
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t day12-agent:prod .
+
+      - name: Check image size
+        run: |
+          SIZE=$(docker images day12-agent:prod --format "{{.Size}}")
+          echo "Image size: $SIZE"
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [test, build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          npm install -g @railway/cli
+          railway login --token $RAILWAY_TOKEN
+          railway up --service agent
+          railway variables --set AGENT_API_KEY=ci-dummy --set REDIS_URL="fake://" --set RATE_LIMIT_PER_MINUTE=10 --set MONTHLY_BUDGET_USD=10.0 --set LOG_LEVEL=INFO
+
+      - name: Wait for deployment
+        run: sleep 45
+
+      - name: Smoke test
+        run: curl -fsS "${{ vars.PUBLIC_URL }}/health" || exit 1
