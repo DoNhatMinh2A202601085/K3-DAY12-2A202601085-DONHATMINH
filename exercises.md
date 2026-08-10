@@ -42,12 +42,17 @@ docker images | grep agent
 
 | Bản | Dung lượng |
 |-----|-----------|
-| 1 stage (bản đầu) | ... MB |
-| Multi-stage | ... MB |
+| 1 stage (bản đầu) | 1730 MB (1.73 GB) |
+| Multi-stage | 270 MB |
 
 Giải thích: phần dung lượng chênh lệch đó là những gì?
 
-> *Câu trả lời của bạn*
+> **Kết quả đo được:**
+> - 1 stage (bản gốc `FROM python:3.11`): **1730 MB**
+> - Multi-stage (bản đã sửa): **270 MB**
+> - Chênh lệch: **~1.46 GB** (~84% nhẹ hơn)
+>
+> **Giải thích:** Bản 1 stage chứa toàn bộ Python image đầy đủ (~900MB base) cộng thêm compiler (build-essential, pip cache) và các file không cần thiết. Multi-stage dùng `python:3.11-slim` làm base image nhẹ hơn nhiều, và quan trọng hơn — stage `builder` (chứa compiler để biên dịch dependencies) bị **DISCARD** hoàn toàn sau khi copy kết quả sang runtime stage. Chỉ có `/usr/local` (thư viện đã cài) và source code mới sang stage cuối. Nhờ đó image multi-stage chỉ gồm runtime cần thiết để chạy app.
 
 ---
 

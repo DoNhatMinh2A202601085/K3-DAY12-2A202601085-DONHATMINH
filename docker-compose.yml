@@ -5,14 +5,14 @@
 #     docker compose up -d redis
 #
 # NHIỆM VỤ: bổ sung service `agent`. Yêu cầu:
-#   [ ] build từ Dockerfile trong thư mục hiện tại
-#   [ ] map cổng ra ngoài (8000:8000)
-#   [ ] KHÔNG viết secret thẳng vào file này — dùng nội suy biến môi trường
+#   [x] build từ Dockerfile trong thư mục hiện tại
+#   [x] map cổng ra ngoài (8000:8000)
+#   [x] KHÔNG viết secret thẳng vào file này — dùng nội suy biến môi trường
 #       `${AGENT_API_KEY}` (docker compose tự đọc từ file .env cùng thư mục)
-#   [ ] REDIS_URL trỏ tới `redis://redis:6379/0` — trong compose, tên service
+#   [x] REDIS_URL trỏ tới `redis://redis:6379/0` — trong compose, tên service
 #       chính là hostname
-#   [ ] depends_on: redis
-#   [ ] healthcheck gọi /health
+#   [x] depends_on: redis
+#   [x] healthcheck gọi /health
 #
 # ĐIỂM CỘNG: thêm service `nginx` làm load balancer (nginx/nginx.conf đã có sẵn)
 #     docker compose up --scale agent=3
@@ -34,10 +34,21 @@ services:
       timeout: 3s
       retries: 5
 
-  # TODO (CP2): khai báo service `agent` ở đây
-  # agent:
-  #   build: .
-  #   ...
+  agent:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      AGENT_API_KEY: ${AGENT_API_KEY}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
 volumes:
   redis-data:
